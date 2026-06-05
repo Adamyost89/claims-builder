@@ -1,0 +1,713 @@
+// Claims Builder - full schema (Phase 0) (Phase 0)
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  SUPPLEMENT_WRITER
+  VIEWER
+}
+
+enum ClaimStatus {
+  DRAFT
+  INGESTING
+  IN_REVIEW
+  READY_FOR_OUTPUT
+  EXPORTED
+  ARCHIVED
+}
+
+enum ClaimType {
+  ROOF
+  SIDING
+  GUTTERS
+  INTERIOR
+  EXTERIOR
+  MIXED
+}
+
+enum WorkflowStage {
+  UPLOAD
+  PARSE
+  HUMAN_REVIEW
+  MEASUREMENT_COMPARISON
+  RULE_ISSUE_DETECTION
+  EVIDENCE_VALIDATION
+  GENERATION
+  HUMAN_APPROVAL
+  EXPORT
+}
+
+enum DocumentType {
+  CARRIER_ESTIMATE
+  CONTRACTOR_ESTIMATE
+  EAGLEVIEW
+  HOVER
+  GAF
+  ITEL
+  PHOTO
+  INVOICE
+  POLICY_JACKET
+  CARRIER_EMAIL
+  CODE
+  MANUFACTURER
+  FIELD_NOTE
+  OTHER
+}
+
+enum ParseStatus {
+  PENDING
+  PROCESSING
+  COMPLETE
+  FAILED
+  NEEDS_REVIEW
+}
+
+enum ReviewStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EDITED
+}
+
+enum MeasurementVendor {
+  EAGLEVIEW
+  HOVER
+  GAF
+  OTHER
+}
+
+enum ExtractionMethod {
+  HEURISTIC
+  LLM
+  MANUAL
+}
+
+enum EvidenceType {
+  MEASUREMENT
+  PHOTO
+  CODE
+  MANUFACTURER
+  INVOICE
+  CARRIER_INCONSISTENCY
+  POLICY
+  FIELD_NOTE
+  CALCULATION
+}
+
+enum IssueCategory {
+  OMITTED_ITEM
+  MEASUREMENT_DEFICIENCY
+  ESTIMATE_INCONSISTENCY
+  CODE_MANUFACTURER
+  INSTALLATION_INSUFFICIENCY
+}
+
+enum IssueStatus {
+  DRAFT
+  NEEDS_EVIDENCE
+  READY_FOR_OUTPUT
+  EXCLUDED
+  FINALIZED
+}
+
+enum ReadinessStatus {
+  NOT_ASSESSED
+  NEEDS_EVIDENCE
+  PARTIALLY_READY
+  READY_FOR_OUTPUT
+  EXCLUDED
+}
+
+enum RuleAuthority {
+  CODE
+  MANUFACTURER
+  CARRIER_INCONSISTENCY
+  MEASUREMENT
+  PHOTO
+  INVOICE
+  POLICY
+}
+
+enum OutputMode {
+  FULL_SUPPLEMENT
+  CARRIER_REBUTTAL
+  SHORT_REPLY
+  INTERNAL_AUDIT
+  SCOPE_COMPARISON
+  MISSING_EVIDENCE_CHECKLIST
+}
+
+enum OutputStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  EXPORTED
+}
+
+enum ConfidenceReviewType {
+  ESTIMATE_LINE
+  MEASUREMENT_VALUE
+  DOCUMENT_CLASSIFICATION
+  RULE_TRIGGER
+}
+
+enum ConfidenceReviewResolution {
+  PENDING
+  ACCEPTED
+  EDITED
+  REJECTED
+  DEFERRED
+}
+
+enum ParserType {
+  CARRIER_ESTIMATE
+  EAGLEVIEW
+  HOVER
+  GAF
+  ITEL
+}
+
+enum AuditEventType {
+  CLAIM_CREATE
+  CLAIM_UPDATE
+  NOTE_CREATE
+  UPLOAD
+  DOCUMENT_DELETE
+  PARSE
+  MANUAL_EDIT
+  RULE_TRIGGER
+  EVIDENCE_LINK
+  OVERRIDE
+  GENERATE
+  TONE_LINT_FAIL
+  APPROVAL
+  EXPORT
+  EXPORT_BLOCKED
+  GATE_BLOCKED
+  CONFIDENCE_RESOLVE
+  COMPARISON_RUN
+  COMPARISON_REVIEW
+  ISSUE_DETECTION_RUN
+  ISSUE_REVIEW
+  NO_ISSUES_FOUND
+  EVIDENCE_REVIEW
+  EVIDENCE_UNLINK
+  OUTPUT_DELETE
+  DRY_RUN_REVIEW
+  PRODUCTION_OVERRIDE
+  PRODUCTION_OVERRIDE_REVOKE
+  WORKFLOW_ADVANCE
+}
+
+enum ReviewTaskStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         UserRole @default(VIEWER)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  claimsCreated   Claim[] @relation("ClaimCreatedBy")
+  claimsAssigned  Claim[] @relation("ClaimAssignedTo")
+  documentsUploaded Document[] @relation("DocumentUploadedBy")
+  documentsDeleted  Document[] @relation("DocumentDeletedBy")
+  extractionsReviewed DocumentExtraction[] @relation("ExtractionReviewedBy")
+  lineItemsReviewed   EstimateLineItem[] @relation("LineItemReviewedBy")
+  measurementsReviewed MeasurementValue[] @relation("MeasurementReviewedBy")
+  claimNotes      ClaimNote[]
+  claimEvents     ClaimEvent[]
+  rulesCreated    Rule[] @relation("RuleCreatedBy")
+  overrides       RevisionItem[] @relation("RevisionOverrideBy")
+  confidenceResolved ConfidenceReviewItem[] @relation("ConfidenceResolvedBy")
+  outputsApproved GeneratedOutput[] @relation("OutputApprovedBy")
+  outputsExported GeneratedOutput[] @relation("OutputExportedBy")
+  dryRunReviews   Claim[] @relation("DryRunReviewedBy")
+}
+
+model OrgSettings {
+  id                    String    @id @default("default")
+  productionReady       Boolean   @default(false)
+  fixtureTestsPassedAt  DateTime?
+  dryRunsReviewedCount  Int       @default(0)
+  dryRunsRequired       Int       @default(10)
+  confidenceThreshold   Float     @default(0.85)
+  productionOverrideBy  String?
+  productionOverrideAt  DateTime?
+  productionOverrideNote String?
+  productionOverrideExpiresAt DateTime?
+  productionOverrideRevokedAt DateTime?
+  productionOverrideRevokedBy String?
+  productionOverrideRevokeNote String?
+  updatedAt             DateTime  @updatedAt
+}
+
+model IssueDetectionCertification {
+  id               String    @id @default("default")
+  version          String    @default("1.0.0")
+  requiredAccuracy Float     @default(1)
+  fixtureAccuracy  Float?
+  certified        Boolean   @default(false)
+  certifiedAt      DateTime?
+  lastRunAt        DateTime?
+  failuresJson     String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+model BannedPhrase {
+  id        String   @id @default(cuid())
+  phrase    String   @unique
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model Claim {
+  id                   String        @id @default(cuid())
+  customerName         String
+  propertyAddress      String
+  carrier              String
+  claimNumber          String
+  policyNumber         String?
+  dateOfLoss           DateTime
+  state                String
+  city                 String
+  county               String?
+  manufacturerSystem   String?
+  claimType            ClaimType     @default(ROOF)
+  status               ClaimStatus   @default(DRAFT)
+  workflowStage        WorkflowStage @default(UPLOAD)
+  isDryRun             Boolean       @default(false)
+  dryRunReviewedAt     DateTime?
+  dryRunReviewedById   String?
+  comparisonReviewedAt DateTime?
+  issuesReviewedAt     DateTime?
+  evidenceReviewedAt   DateTime?
+  createdById          String
+  assignedToId         String?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  createdBy       User  @relation("ClaimCreatedBy", fields: [createdById], references: [id])
+  assignedTo      User? @relation("ClaimAssignedTo", fields: [assignedToId], references: [id])
+  dryRunReviewedBy User? @relation("DryRunReviewedBy", fields: [dryRunReviewedById], references: [id])
+
+  notes                  ClaimNote[]
+  documents              Document[]
+  photos                 Photo[]
+  estimateLineItems      EstimateLineItem[]
+  measurementReports     MeasurementReport[]
+  measurementValues      MeasurementValue[]
+  comparisonResults      ComparisonResult[]
+  rulesEvaluated         RuleEvaluation[]
+  revisionItems          RevisionItem[]
+  evidenceLinks          EvidenceLink[]
+  calculations           Calculation[]
+  generatedOutputs       GeneratedOutput[]
+  reviewTasks            ReviewTask[]
+  events                 ClaimEvent[]
+  confidenceReviewItems  ConfidenceReviewItem[]
+  documentExtractions    DocumentExtraction[]
+}
+
+model ClaimNote {
+  id        String   @id @default(cuid())
+  claimId   String
+  authorId  String
+  body      String
+  createdAt DateTime @default(now())
+
+  claim  Claim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  author User  @relation(fields: [authorId], references: [id])
+}
+
+model Document {
+  id                       String       @id @default(cuid())
+  claimId                  String
+  type                     DocumentType
+  fileName                 String
+  mimeType                 String
+  storageKey               String
+  fileSize                 Int
+  parseStatus              ParseStatus  @default(PENDING)
+  parseError               String?
+  confidence               Float?
+  classificationConfidence Float?
+  reviewStatus             ReviewStatus @default(PENDING)
+  metadataJson             String?
+  uploadedById             String
+  deletedAt                DateTime?
+  deletedById              String?
+  createdAt                DateTime     @default(now())
+  updatedAt                DateTime     @updatedAt
+
+  claim        Claim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  uploadedBy   User  @relation("DocumentUploadedBy", fields: [uploadedById], references: [id])
+  deletedBy    User? @relation("DocumentDeletedBy", fields: [deletedById], references: [id])
+  lineItems    EstimateLineItem[]
+  measurements MeasurementReport[]
+  extractions  DocumentExtraction[]
+}
+
+model DocumentExtraction {
+  id                 String           @id @default(cuid())
+  documentId         String
+  claimId            String
+  fieldName          String
+  fieldValue         String
+  originalFieldValue String?
+  sourcePage         Int?
+  sourceText         String?
+  confidence         Float
+  extractionMethod   ExtractionMethod
+  reviewStatus       ReviewStatus     @default(PENDING)
+  reviewedById       String?
+  reviewedAt         DateTime?
+  createdAt          DateTime         @default(now())
+
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  claim      Claim    @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  reviewedBy User?    @relation("ExtractionReviewedBy", fields: [reviewedById], references: [id])
+
+  @@index([documentId, fieldName])
+  @@index([claimId, reviewStatus])
+}
+
+model ParserCertification {
+  id               String     @id @default(cuid())
+  parserType       ParserType @unique
+  requiredAccuracy Float
+  fixtureAccuracy  Float?
+  parserCertified  Boolean    @default(false)
+  lastCertifiedAt  DateTime?
+  notes            String?
+  updatedAt        DateTime   @updatedAt
+}
+
+model Photo {
+  id           String       @id @default(cuid())
+  claimId      String
+  documentId   String?
+  fileName     String
+  storageKey   String
+  caption      String?
+  takenAt      DateTime?
+  reviewStatus ReviewStatus @default(PENDING)
+  metadataJson String?
+  createdAt    DateTime     @default(now())
+
+  claim Claim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+}
+
+model EstimateLineItem {
+  id                  String           @id @default(cuid())
+  claimId             String
+  documentId          String
+  extractionId        String?
+  description         String
+  originalDescription String?
+  quantity            Float
+  originalQuantity    Float?
+  unit                String
+  unitPrice           Float?
+  total               Float?
+  category            String?
+  lineCode            String?
+  sourcePage          Int?
+  rawText             String?
+  confidence          Float            @default(1)
+  reviewStatus        ReviewStatus     @default(PENDING)
+  extractionMethod    ExtractionMethod @default(HEURISTIC)
+  reviewedById        String?
+  reviewedAt          DateTime?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  claim      Claim    @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  reviewedBy User?    @relation("LineItemReviewedBy", fields: [reviewedById], references: [id])
+}
+
+model MeasurementReport {
+  id             String            @id @default(cuid())
+  claimId        String
+  documentId     String
+  vendor         MeasurementVendor
+  reportName     String?
+  reportDate     DateTime?
+  confidence     Float?
+  rawSummaryJson String?
+  createdAt      DateTime          @default(now())
+
+  claim    Claim             @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  document Document          @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  values   MeasurementValue[]
+}
+
+model MeasurementValue {
+  id               String           @id @default(cuid())
+  reportId         String
+  claimId          String
+  extractionId     String?
+  key              String
+  value            Float
+  originalValue    Float?
+  unit             String
+  slope            String?
+  sourcePage       Int?
+  rawText          String?
+  confidence       Float            @default(1)
+  reviewStatus     ReviewStatus     @default(PENDING)
+  extractionMethod ExtractionMethod @default(HEURISTIC)
+  reviewedById     String?
+  reviewedAt       DateTime?
+  createdAt        DateTime         @default(now())
+
+  report     MeasurementReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  claim      Claim             @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  reviewedBy User?             @relation("MeasurementReviewedBy", fields: [reviewedById], references: [id])
+}
+
+model ComparisonResult {
+  id                   String   @id @default(cuid())
+  claimId              String
+  comparisonKey        String
+  approvedQty          Float
+  requestedQty         Float
+  difference           Float
+  pctDifference        Float?
+  formula              String
+  physicallySufficient Boolean  @default(true)
+  explanation          String
+  sourceDocumentIds    String
+  carrierLineItemId    String?
+  measurementValueIds  String
+  isWarning            Boolean  @default(false)
+  unit                 String   @default("")
+  createdAt            DateTime @default(now())
+
+  claim Claim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  @@index([claimId, comparisonKey])
+}
+
+model Rule {
+  id               String        @id @default(cuid())
+  title            String
+  scopeCategory    String
+  jurisdiction     String?
+  authorityType    RuleAuthority
+  citationText     String
+  sourceDocument   String?
+  appliesWhen      String
+  requiredEvidence String
+  outputLanguage   String
+  active           Boolean       @default(true)
+  needsReview      Boolean       @default(false)
+  isSystem         Boolean       @default(false)
+  createdById      String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  createdBy   User?            @relation("RuleCreatedBy", fields: [createdById], references: [id])
+  evaluations RuleEvaluation[]
+  revisions   RevisionItem[]
+}
+
+model RuleEvaluation {
+  id                    String   @id @default(cuid())
+  claimId               String
+  ruleId                String
+  triggered             Boolean
+  confidence            Float?
+  needsConfidenceReview Boolean  @default(false)
+  revisionItemId        String?
+  resultJson            String?
+  evaluatedAt           DateTime @default(now())
+
+  claim Claim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  rule  Rule  @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+}
+
+model RevisionItem {
+  id                    String          @id @default(cuid())
+  claimId               String
+  sectionNumber         Int?
+  title                 String
+  category              IssueCategory
+  carrierApprovedLineItem String?
+  carrierApprovedQty    Float?
+  carrierApprovedUnit   String?
+  requestedLineItem     String?
+  requestedQty          Float?
+  requestedUnit         String?
+  qtyDifference         Float?
+  calculationMethod     String?
+  basis                 String?
+  revisionRequired      String?
+  status                IssueStatus     @default(DRAFT)
+  readinessStatus       ReadinessStatus @default(NOT_ASSESSED)
+  exportEligible        Boolean         @default(false)
+  requiredEvidenceTypes String          @default("[]")
+  excludedReason        String?
+  overrideById          String?
+  overrideNote          String?
+  overriddenAt          DateTime?
+  ruleId                String?
+  sourceDetectionType   String?
+  comparisonResultId    String?
+  calculationId         String?
+  detectionKey          String?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  claim      Claim  @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  rule       Rule?  @relation(fields: [ruleId], references: [id])
+  overrideBy User?  @relation("RevisionOverrideBy", fields: [overrideById], references: [id])
+  evidenceLinks EvidenceLink[]
+
+  @@index([claimId, detectionKey])
+  @@index([claimId, category])
+}
+
+model EvidenceLink {
+  id              String       @id @default(cuid())
+  claimId         String
+  revisionItemId  String
+  evidenceType    EvidenceType
+  targetTable     String
+  targetId        String
+  label           String
+  snippet         String?
+  isRequired      Boolean      @default(true)
+  isSatisfied     Boolean      @default(false)
+  createdAt       DateTime     @default(now())
+
+  claim        Claim        @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  revisionItem RevisionItem @relation(fields: [revisionItemId], references: [id], onDelete: Cascade)
+}
+
+model Calculation {
+  id              String   @id @default(cuid())
+  claimId         String
+  revisionItemId  String?
+  calculatorType  String
+  inputsJson      String
+  outputsJson     String
+  formula         String
+  explanation     String
+  version         String   @default("1")
+  createdAt       DateTime @default(now())
+
+  claim Claim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+}
+
+model GeneratedOutput {
+  id                    String       @id @default(cuid())
+  claimId               String
+  outputMode            OutputMode
+  status                OutputStatus @default(DRAFT)
+  contentText           String?
+  contentJson           String?
+  model                 String?
+  promptVersion         String?
+  toneLintPassed        Boolean      @default(false)
+  toneLintViolations    String?
+  unsupportedClaimsJson String       @default("[]")
+  generationBlocked     Boolean      @default(false)
+  isMockGeneration      Boolean      @default(false)
+  revisionIdsIncluded   String       @default("[]")
+  approvedSections      String?
+  approvedById          String?
+  approvedAt            DateTime?
+  exportedAt            DateTime?
+  exportedById          String?
+  exportFormat          String?
+  version               Int          @default(1)
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  claim      Claim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  approvedBy User? @relation("OutputApprovedBy", fields: [approvedById], references: [id])
+  exportedBy User? @relation("OutputExportedBy", fields: [exportedById], references: [id])
+}
+
+model ReviewTask {
+  id                  String           @id @default(cuid())
+  claimId             String
+  relatedType         String
+  relatedId           String
+  title               String
+  description         String
+  requiredEvidenceType EvidenceType?
+  status              ReviewTaskStatus @default(OPEN)
+  dueAt               DateTime?
+  resolvedAt          DateTime?
+  createdAt           DateTime         @default(now())
+
+  claim Claim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+}
+
+model ConfidenceReviewItem {
+  id              String                     @id @default(cuid())
+  claimId         String
+  reviewType      ConfidenceReviewType
+  relatedTable    String
+  relatedId       String
+  confidence      Float
+  reason          String
+  blocksOutput    Boolean                    @default(true)
+  resolution      ConfidenceReviewResolution @default(PENDING)
+  resolvedById    String?
+  resolvedAt      DateTime?
+  resolutionNote  String?
+  beforeJson      String?
+  afterJson       String?
+  createdAt       DateTime                   @default(now())
+
+  claim      Claim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  resolvedBy User? @relation("ConfidenceResolvedBy", fields: [resolvedById], references: [id])
+
+  @@index([claimId, resolution])
+}
+
+model ClaimEvent {
+  id          String         @id @default(cuid())
+  claimId     String?
+  actorId     String?
+  eventType   AuditEventType
+  payloadJson String
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime       @default(now())
+
+  claim Claim? @relation(fields: [claimId], references: [id], onDelete: SetNull)
+  actor User?  @relation(fields: [actorId], references: [id])
+
+  @@index([claimId, eventType, createdAt])
+}
+
+model OutputTemplate {
+  id              String     @id @default(cuid())
+  name            String
+  outputMode      OutputMode
+  headerTemplate  String?
+  sectionTemplate String?
+  active          Boolean    @default(true)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+}

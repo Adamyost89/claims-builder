@@ -20,6 +20,9 @@
 # production
 /build
 
+# local embedded PostgreSQL data (fallback when Docker is unavailable)
+.embedded-postgres/
+
 # misc
 .DS_Store
 *.pem
