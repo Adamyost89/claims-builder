@@ -11,9 +11,13 @@
     "test:fixtures": "vitest run tests/fixtures",
     "test:watch": "vitest",
     "certify:issues": "tsx scripts/certify-issues.ts",
+    "db": "prisma migrate deploy && prisma db seed",
+    "db:migrate": "prisma migrate deploy",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
+    "test:pg": "tsx scripts/pg-smoke-test.ts",
+    "staging:check": "tsx scripts/staging-check.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

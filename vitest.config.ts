@@ -6,7 +6,7 @@ export default defineConfig({
     environment: "node",
     setupFiles: ["./tests/setup-env.ts"],
     include: ["tests/**/*.test.ts"],
-    // Integration tests share one SQLite OrgSettings row; run files sequentially.
+    // Integration tests share one OrgSettings row; run files sequentially.
     fileParallelism: false,
   },
   resolve: {

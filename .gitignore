@@ -42,3 +42,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# local storage/uploads
+storage/
+
+# claim uploads
+uploads/
