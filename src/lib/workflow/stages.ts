@@ -86,6 +86,12 @@ export const WORKFLOW_STEPS: WorkflowStepConfig[] = [
   },
 ];
 
+export function getWorkflowStepForStage(
+  stage: WorkflowStage,
+): WorkflowStepConfig | undefined {
+  return WORKFLOW_STEPS.find((step) => step.stage === stage);
+}
+
 export function getWorkflowStageIndex(stage: WorkflowStage): number {
   return WORKFLOW_STAGE_ORDER.indexOf(stage);
 }
