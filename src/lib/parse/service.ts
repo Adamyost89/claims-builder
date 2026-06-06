@@ -1,5 +1,6 @@
 import {
   DocumentType,
+  ExtractionMethod,
   MeasurementVendor,
   ParseStatus,
   ReviewStatus,
@@ -12,6 +13,8 @@ import {
   maybeQueueLowConfidence,
 } from "@/lib/confidence/queue";
 import { prisma } from "@/lib/db";
+import { runAiParseFallback } from "@/lib/parse/ai/fallback";
+import type { BlockedAiExtraction } from "@/lib/parse/ai/convert";
 import { getConfidenceThreshold } from "@/lib/parsers/confidence";
 import { isParserCertified } from "@/lib/parsers/certification";
 import type { ParseResult } from "@/lib/parsers/types";
@@ -64,7 +67,7 @@ export async function parseClaimDocument(input: {
     });
 
     const parserCertified = await isParserCertified(parserType);
-    const parseResult = parser.parse({
+    const heuristicResult = parser.parse({
       documentId: document.id,
       claimId: input.claimId,
       documentType: document.type,
@@ -74,9 +77,20 @@ export async function parseClaimDocument(input: {
       parserCertified,
     });
 
+    const threshold = await getConfidenceThreshold();
+    const aiFallback = await runAiParseFallback({
+      documentId: document.id,
+      claimId: input.claimId,
+      documentType: document.type,
+      pages: text.pages,
+      fullText: text.fullText,
+      heuristicResult,
+      threshold,
+    });
+    const parseResult = aiFallback.parseResult;
+
     await clearPriorParseResults(document.id, input.claimId);
 
-    const threshold = await getConfidenceThreshold();
     await persistParseResult({
       claimId: input.claimId,
       documentId: document.id,
@@ -84,9 +98,13 @@ export async function parseClaimDocument(input: {
       parseResult,
       parserCertified,
       threshold,
+      blockedExtractions: aiFallback.blockedExtractions,
     });
 
-    const needsReview = !parserCertified || parseResult.overallConfidence < threshold;
+    const needsReview =
+      !parserCertified ||
+      parseResult.overallConfidence < threshold ||
+      aiFallback.aiApplied;
 
     const updated = await prisma.document.update({
       where: { id: document.id },
@@ -99,6 +117,7 @@ export async function parseClaimDocument(input: {
           parserCertified,
           pageCount: text.pages.length,
           warnings: parseResult.warnings,
+          aiApplied: aiFallback.aiApplied,
           parsedAt: new Date().toISOString(),
         }),
       },
@@ -116,6 +135,7 @@ export async function parseClaimDocument(input: {
         lineItemCount: parseResult.lineItems.length,
         measurementCount: parseResult.measurements.length,
         fieldCount: parseResult.fields.length,
+        aiApplied: aiFallback.aiApplied,
       },
     });
 
@@ -177,7 +197,24 @@ async function persistParseResult(input: {
   parseResult: ParseResult;
   parserCertified: boolean;
   threshold: number;
+  blockedExtractions?: BlockedAiExtraction[];
 }) {
+  for (const blocked of input.blockedExtractions ?? []) {
+    await createConfidenceReviewItem({
+      claimId: input.claimId,
+      reviewType: "DOCUMENT_CLASSIFICATION",
+      relatedTable: "Document",
+      relatedId: input.documentId,
+      confidence: blocked.confidence,
+      reason: `${blocked.fieldName}: ${blocked.reason}`,
+      blocksOutput: true,
+      beforeJson: {
+        sourceText: blocked.sourceText ?? null,
+        fieldName: blocked.fieldName,
+      },
+    });
+  }
+
   for (const field of input.parseResult.fields) {
     const extraction = await createDocumentExtraction({
       documentId: input.documentId,
@@ -193,6 +230,7 @@ async function persistParseResult(input: {
       label: field.fieldName,
       parserCertified: input.parserCertified,
       threshold: input.threshold,
+      extractionMethod: field.provenance.extractionMethod,
     });
   }
 
@@ -232,6 +270,7 @@ async function persistParseResult(input: {
       label: item.description,
       parserCertified: input.parserCertified,
       threshold: input.threshold,
+      extractionMethod: item.provenance.extractionMethod,
     });
   }
 
@@ -280,6 +319,7 @@ async function persistParseResult(input: {
         label: measurement.key,
         parserCertified: input.parserCertified,
         threshold: input.threshold,
+        extractionMethod: measurement.provenance.extractionMethod,
       });
     }
   }
@@ -293,6 +333,7 @@ async function queueIfNeeded(input: {
   label: string;
   parserCertified: boolean;
   threshold: number;
+  extractionMethod: ExtractionMethod;
 }) {
   const reviewType =
     input.relatedTable === "EstimateLineItem"
@@ -300,6 +341,19 @@ async function queueIfNeeded(input: {
       : input.relatedTable === "MeasurementValue"
         ? "MEASUREMENT_VALUE"
         : "DOCUMENT_CLASSIFICATION";
+
+  if (input.extractionMethod === "LLM") {
+    await createConfidenceReviewItem({
+      claimId: input.claimId,
+      reviewType,
+      relatedTable: input.relatedTable,
+      relatedId: input.relatedId,
+      confidence: input.confidence,
+      reason: `AI extraction requires human review: ${input.label}.`,
+      blocksOutput: true,
+    });
+    return;
+  }
 
   if (!input.parserCertified) {
     await createConfidenceReviewItem({
